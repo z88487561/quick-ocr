@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14181c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="隨手複製">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>隨手複製</title>
+<style>
+:root{--bg:#14181c;--panel:#1d2329;--fg:#eef1f3;--dim:#8d99a3;--acc:#ffd23f;--sel:rgba(255,210,63,.38)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;overflow:hidden}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.view{position:fixed;inset:0;display:none;flex-direction:column;padding:inherit}
+.view.on{display:flex}
+button{font:inherit;color:var(--fg);background:var(--panel);border:1px solid #38424b;border-radius:10px;padding:10px 16px;cursor:pointer}
+button.pri{background:var(--acc);color:#14181c;border-color:var(--acc);font-weight:700}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#captureInfo{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:72px 24px 24px;text-align:center;color:var(--dim)}
+#captureInfo strong{color:var(--fg);font-size:20px}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;background:var(--bg)}
+#capture{flex:1}
+/* result */
+#imgWrap{position:relative;flex:1;min-height:0;overflow:hidden;background:#000;touch-action:none}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-select:none;line-height:0}
+#stage img{width:100%;height:100%;display:block;pointer-events:none}
+#zc{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:3}
+#zc button{padding:4px 12px;background:rgba(20,24,28,.82)}
+#imgWrap.mv{cursor:grab}
+#stage .w{position:absolute;border:1px solid rgba(255,255,255,.35);border-radius:2px;pointer-events:none}
+#stage .w.s{background:var(--sel);border-color:var(--acc)}
+#rect{position:absolute;border:2px dashed var(--acc);background:rgba(255,210,63,.12);display:none;pointer-events:none}
+.hint{padding:6px 16px;font-size:13px;color:var(--dim);background:var(--panel)}
+#txt{width:100%;height:30vh;background:var(--panel);color:var(--fg);border:0;padding:12px 16px;font:inherit;resize:none}
+#txt:focus{outline:none}
+#prog{position:fixed;inset:0;background:rgba(20,24,28,.88);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:5}
+#prog.on{display:flex}
+#pbar{width:60%;max-width:320px;height:6px;background:#38424b;border-radius:3px;overflow:hidden}
+#pbar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+#toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:var(--acc);color:#14181c;padding:8px 18px;border-radius:20px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}
+#toast.on{opacity:1}
+#status{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;z-index:2}
+#status>*{pointer-events:auto;background:rgba(20,24,28,.78);border-radius:16px;padding:4px 12px;font-size:13px}
+#install{display:none;color:#14181c;background:var(--acc);font-weight:700;border:0}
+#upd{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);display:none;align-items:center;justify-content:space-between;gap:12px;background:var(--acc);color:#14181c;padding:10px 14px;border-radius:12px;z-index:20;font-weight:700}
+#upd button{background:#14181c;color:var(--fg);border:0;padding:6px 14px}
+#ios{display:none;position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);background:var(--panel);border:1px solid #38424b;padding:12px 14px;border-radius:12px;z-index:20;font-size:14px}
+select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid #38424b;border-radius:10px;padding:9px 8px}
+/* live camera */
+#liv{background:#000}
+#liveWrap{position:relative;flex:1;min-height:0;background:#000;display:flex}
+#live{width:100%;height:100%;object-fit:contain;background:#000}
+#livTop{position:absolute;top:10px;left:12px;right:12px;display:flex;gap:8px;align-items:center;z-index:2}
+#livTop button,#livTop select{background:rgba(20,24,28,.78)}
+#camSel{flex:1;min-width:0;text-overflow:ellipsis}
+#zoomBar{position:absolute;left:16px;right:16px;bottom:12px;display:none;align-items:center;gap:10px;background:rgba(20,24,28,.7);border-radius:20px;padding:6px 14px;z-index:2}
+#zoomBar input{flex:1;accent-color:var(--acc)}
+#zoomVal{min-width:3.2em;text-align:right;font-size:13px}
+.livbar{display:grid;grid-template-columns:1fr auto 1fr;gap:12px}
+.livbar>:first-child{justify-self:start}
+.livbar>:last-child{justify-self:end}
+#shutter{width:72px;height:72px;border-radius:50%;padding:0;background:var(--acc);border:4px solid #14181c;box-shadow:0 0 0 3px var(--acc)}
+#shutter:disabled{opacity:.5}
+</style>
+</head>
+<body>
+
+<section id="cam" class="view on">
+  <div id="status"><span id="net"></span><button id="install">安裝 App</button></div>
+  <div id="captureInfo"><strong>拍照後立即辨識文字</strong><span>即時預覽拍攝（可切換鏡頭並自動記憶），或選擇裝置中的照片</span></div>
+  <div class="bar">
+    <select id="lang" aria-label="辨識語言">
+      <option value="chi_tra+eng">繁中＋英文</option>
+      <option value="eng">僅英文（較快）</option>
+    </select>
+    <button class="pri" id="capture">拍照辨識</button>
+    <button id="pick">選照片</button>
+  </div>
+  <input id="file" type="file" accept="image/*" hidden>
+  <input id="cameraFile" type="file" accept="image/*" capture="environment" hidden>
+</section>
+
+<section id="liv" class="view">
+  <div id="liveWrap">
+    <video id="live" playsinline muted autoplay></video>
+    <div id="livTop"><button id="livBack">返回</button><select id="camSel" aria-label="切換鏡頭"></select></div>
+    <div id="zoomBar"><span>縮放</span><input type="range" id="zoom" aria-label="縮放"><span id="zoomVal"></span></div>
+  </div>
+  <div class="bar livbar">
+    <select id="lang2" aria-label="辨識語言">
+      <option value="chi_tra+eng">繁中＋英文</option>
+      <option value="eng">僅英文（較快）</option>
+    </select>
+    <button id="shutter" aria-label="拍照"></button>
+    <button id="pick2">選照片</button>
+  </div>
+</section>
+
+<section id="res" class="view">
+  <div class="bar">
+    <button id="retake">重拍</button>
+    <button id="selAll">全選</button>
+    <button id="clear">清除選取</button>
+  </div>
+  <div id="imgWrap"><div id="stage"><img id="shot" alt="拍攝的照片"><div id="rect"></div></div>
+    <div id="zc"><button id="mO" aria-label="縮小">－</button><button id="mZ" aria-label="放大">＋</button><button id="mFit">適合</button><button id="mMove">移動</button></div></div>
+  <div class="hint" id="hint">拖曳框選範圍、點一下選單字；雙指（或滾輪）縮放、平移</div>
+  <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
+  <div class="bar"><span id="count" style="color:var(--dim)"></span><button class="pri" id="copy">複製文字</button></div>
+</section>
+
+<div id="prog"><div id="pmsg">準備中…</div><div id="pbar"><i></i></div></div>
+<div id="toast">已複製</div>
+<div id="upd"><span>有新版本可用</span><button id="updBtn">立即更新</button></div>
+<div id="ios">要安裝：點瀏覽器的「分享」→「加入主畫面」 <button id="iosX" style="margin-left:8px;padding:2px 10px">關閉</button></div>
+
+<script src="vendor/tesseract.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+let stage=$('stage'),shot=$('shot'),rectEl=$('rect'),txt=$('txt');
+let words=[],lines=[],sel=new Set(),imgW=1,imgH=1,boxEls=[];
+
+/* ---------- storage helper ---------- */
+const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang'};
+const ls={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}},del:k=>{try{localStorage.removeItem(k)}catch{}}};
+
+/* ---------- image picker (and native camera as fallback) ---------- */
+$('pick').onclick=()=>$('file').click();
+function openImage(input){
+  const f=input.files[0];if(!f)return;
+  const url=URL.createObjectURL(f),im=new Image();
+  im.onload=()=>{URL.revokeObjectURL(url);run(im,im.naturalWidth,im.naturalHeight)};
+  im.onerror=()=>{URL.revokeObjectURL(url);toast('無法讀取這張照片')};
+  im.src=url;input.value='';
+}
+['file','cameraFile'].forEach(id=>$(id).onchange=e=>openImage(e.currentTarget));
+
+/* ---------- OCR (all assets self-hosted under vendor/) ---------- */
+const abs=p=>new URL(p,location.href).href.replace(/\/$/,'');
+const STAT={'loading tesseract core':'載入辨識引擎…','loading language traineddata':'載入語言資料…','initializing api':'初始化…','recognizing text':'辨識中…'};
+let wkP=null,wkLang='',quiet=false;
+function getWorker(lang,silent){
+  if(wkP&&wkLang===lang){if(!silent)quiet=false;return wkP}
+  const old=wkP;wkLang=lang;quiet=!!silent;
+  const mine=wkP=(async()=>{
+    if(old){try{(await old).terminate()}catch{}}
+    return Tesseract.createWorker(lang,1,{
+      workerPath:abs('vendor/worker.min.js'),corePath:abs('vendor/core'),langPath:abs('vendor/lang'),
+      workerBlobURL:false,cacheMethod:'none',
+      logger:m=>{if(!quiet)setProg(true,STAT[m.status]||m.status,m.progress||0)}
+    });
+  })();
+  mine.catch(()=>{if(wkP===mine){wkP=null;wkLang=''}});
+  return mine;
+}
+// 預熱：提早載入引擎與語言資料，拍完照就能直接辨識
+let warmed=false;
+function warm(){
+  if(!window.Tesseract)return;
+  warmed=true;getWorker($('lang').value,true).catch(()=>{});
+}
+function idleWarm(){
+  if(warmed)return;
+  (window.requestIdleCallback||(f=>setTimeout(f,300)))(()=>{if(!warmed&&!document.hidden)warm()});
+}
+function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id===v))}
+async function run(src,w,h,crop){
+  const MAX=1600,k=Math.min(1,MAX/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
+  const g=c.getContext('2d');
+  if(crop)g.drawImage(src,crop[0],crop[1],crop[2],crop[3],0,0,c.width,c.height);else g.drawImage(src,0,0,c.width,c.height);
+  imgW=c.width;imgH=c.height;
+  shot.src=c.toDataURL('image/jpeg',.9);
+  show('res');fit();txt.value='';words=[];lines=[];sel.clear();clearBoxes();
+  quiet=false;setProg(true,'載入辨識引擎…',0);
+  try{
+    const worker=await getWorker($('lang').value);
+    const {data}=await worker.recognize(c);
+    lines=(data.lines||[]).map(l=>l.words.filter(x=>x.text.trim()&&x.confidence>20));
+    words=lines.flat();
+    lines=lines.map(l=>l.map(w=>words.indexOf(w)));
+    buildBoxes();refresh();
+    if(!words.length)toast('沒有辨識到文字');
+  }catch(e){
+    console.error(e);wkP=null;wkLang='';txt.value='辨識失敗：'+(e.message||e)+'\n（請確認 vendor/ 資料夾已完整上傳）';
+  }
+  setProg(false);
+}
+function setProg(on,msg,p){$('prog').classList.toggle('on',on);if(msg)$('pmsg').textContent=msg;$('pbar').firstChild.style.width=Math.round((p||0)*100)+'%'}
+
+/* ---------- live camera (in-page preview, lens select remembered) ---------- */
+const canLive=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+let stream=null,track=null,camBusy=false,liveBroken=false,shooting=false;
+function stopCam(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=track=null;$('live').srcObject=null;
+}
+async function openCam(id){
+  stopCam();
+  const video={width:{ideal:1920},height:{ideal:1080}};
+  if(id)video.deviceId={exact:id};else video.facingMode={ideal:'environment'};
+  stream=await navigator.mediaDevices.getUserMedia({video,audio:false});
+  track=stream.getVideoTracks()[0];
+  const v=$('live');v.srcObject=stream;
+  await v.play().catch(()=>{});
+  const caps=track.getCapabilities?track.getCapabilities():{};
+  try{if(caps.focusMode&&caps.focusMode.includes('continuous'))await track.applyConstraints({advanced:[{focusMode:'continuous'}]})}catch{}
+  setupZoom(caps);
+}
+function camName(d,i){
+  const l=(d.label||'').replace(/facing back/i,'後置').replace(/facing front/i,'前置');
+  return (i+1)+'. '+(l||'鏡頭');
+}
+async function listCams(){return (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput')}
+function rememberCam(devs){
+  const id=track&&track.getSettings().deviceId;if(!id)return;
+  const d=devs.find(x=>x.deviceId===id);
+  ls.set(LSK.cam,id);if(d&&d.label)ls.set(LSK.camLabel,d.label);
+}
+async function startCam(){
+  if(camBusy)return;camBusy=true;
+  try{
+    const saved=ls.get(LSK.cam),savedLabel=ls.get(LSK.camLabel);
+    let lost=false;
+    try{await openCam(saved||null)}
+    catch(e){
+      if(!saved)throw e;
+      lost=true;await openCam(null);   // 記住的鏡頭 ID 失效，先開預設後鏡頭
+    }
+    let devs=await listCams();
+    if(lost){                          // ID 可能因清除網站資料而改變：改用鏡頭名稱比對
+      const m=savedLabel&&devs.find(d=>d.label===savedLabel);
+      if(m&&m.deviceId!==(track&&track.getSettings().deviceId)){try{await openCam(m.deviceId)}catch{}}
+      devs=await listCams();
+      rememberCam(devs);
+    }
+    $('camSel').innerHTML=devs.map((d,i)=>`<option value="${d.deviceId}">${camName(d,i)}</option>`).join('');
+    const cur=track&&track.getSettings().deviceId;
+    if(cur)$('camSel').value=cur;
+    $('camSel').style.display=devs.length>1?'':'none';
+  }catch(e){
+    console.error(e);liveBroken=true;stopCam();show('cam');
+    toast(e&&e.name==='NotAllowedError'?'相機權限被拒，改用系統相機':'無法開啟即時相機，改用系統相機');
+  }
+  camBusy=false;
+}
+function openLive(){
+  warm();
+  if(!canLive||liveBroken){$('cameraFile').click();return}
+  show('liv');startCam();
+}
+$('capture').onclick=openLive;
+$('livBack').onclick=()=>{stopCam();show('cam')};
+$('pick2').onclick=()=>{stopCam();show('cam');$('file').click()};
+$('camSel').onchange=async e=>{
+  const id=e.target.value;
+  try{await openCam(id);rememberCam(await listCams())}
+  catch(err){console.error(err);toast('這顆鏡頭無法使用');ls.del(LSK.cam);ls.del(LSK.camLabel);try{await openCam(null)}catch{}}
+  const cur=track&&track.getSettings().deviceId;if(cur)$('camSel').value=cur;
+};
+const zkey=()=>LSK.zoom+':'+((track&&track.getSettings().deviceId)||'');
+function setupZoom(caps){
+  const z=caps.zoom,box=$('zoomBar'),r=$('zoom');
+  if(!z||!(z.max>z.min)){box.style.display='none';return}
+  r.min=z.min;r.max=z.max;r.step=z.step||0.1;
+  let v=parseFloat(ls.get(zkey()));
+  if(!(v>=z.min&&v<=z.max))v=track.getSettings().zoom||z.min;
+  r.value=v;applyZoom(v);box.style.display='flex';
+}
+function applyZoom(v){
+  $('zoomVal').textContent=(+v).toFixed(1)+'×';
+  if(track)track.applyConstraints({advanced:[{zoom:+v}]}).catch(()=>{});
+}
+$('zoom').oninput=e=>{applyZoom(e.target.value);ls.set(zkey(),e.target.value)};
+
+async function stillBlob(){
+  const ic=new ImageCapture(track);
+  let s={};
+  try{
+    const pc=await ic.getPhotoCapabilities(),W=pc.imageWidth,H=pc.imageHeight;
+    if(W&&H&&W.max>0&&H.max>0){   // 靜態照限制在約 2560px，避免超高畫素解碼太慢
+      const tw=clamp(2560,W.min,W.max);
+      s={imageWidth:tw,imageHeight:clamp(Math.round(tw*H.max/W.max),H.min,H.max)};
+    }
+  }catch{}
+  try{return await ic.takePhoto(s)}catch{return await ic.takePhoto()}
+}
+async function snap(){
+  if(!track||shooting)return;
+  shooting=true;$('shutter').disabled=true;
+  try{
+    let blob=null;
+    if('ImageCapture'in window){try{blob=await stillBlob()}catch(e){console.warn(e)}}
+    if(blob){
+      const url=URL.createObjectURL(blob),im=new Image();
+      const ok=await new Promise(res=>{im.onload=()=>res(true);im.onerror=()=>res(false);im.src=url});
+      URL.revokeObjectURL(url);
+      if(ok){stopCam();run(im,im.naturalWidth,im.naturalHeight);return}
+    }
+    const v=$('live');                 // 不支援 takePhoto：直接擷取預覽畫面
+    if(v.videoWidth){run(v,v.videoWidth,v.videoHeight);stopCam()}
+  }finally{shooting=false;$('shutter').disabled=false}
+}
+$('shutter').onclick=snap;
+document.addEventListener('visibilitychange',()=>{
+  if(!$('liv').classList.contains('on'))return;
+  if(document.hidden)stopCam();else startCam();
+});
+
+/* language select (two copies, kept in sync + remembered) */
+const langSels=[$('lang'),$('lang2')];
+{const sv=ls.get(LSK.lang);if(sv&&[...$('lang').options].some(o=>o.value===sv))langSels.forEach(x=>x.value=sv)}
+langSels.forEach(x=>x.onchange=()=>{langSels.forEach(y=>y.value=x.value);ls.set(LSK.lang,x.value);warm()});
+
+/* ---------- word boxes + selection ---------- */
+function clearBoxes(){stage.querySelectorAll('.w').forEach(e=>e.remove());boxEls=[]}
+function buildBoxes(){
+  clearBoxes();
+  words.forEach(w=>{
+    const b=w.bbox,d=document.createElement('div');d.className='w';
+    d.style.cssText=`left:${b.x0/imgW*100}%;top:${b.y0/imgH*100}%;width:${(b.x1-b.x0)/imgW*100}%;height:${(b.y1-b.y0)/imgH*100}%`;
+    stage.appendChild(d);boxEls.push(d);
+  });
+}
+const CJK=/[\u2e80-\u9fff\uff00-\uffef\u3000-\u303f]/;
+function joinWords(idx){
+  let s='',prev='';
+  idx.forEach(i=>{
+    const t=words[i].text;
+    if(s&&!(CJK.test(prev.slice(-1))||CJK.test(t[0])))s+=' ';
+    s+=t;prev=t;
+  });return s;
+}
+function textFor(set){
+  const out=[];
+  lines.forEach(l=>{const pick=l.filter(i=>!set||set.has(i));if(pick.length)out.push(joinWords(pick))});
+  return out.join('\n');
+}
+function refresh(){
+  boxEls.forEach((e,i)=>e.classList.toggle('s',sel.has(i)));
+  txt.value=textFor(sel.size?sel:null);
+  $('count').textContent=sel.size?`已選 ${sel.size} 字詞`:`全部 ${words.length} 字詞`;
+}
+/* ---------- result view: pinch/wheel zoom, pan, drag-select ---------- */
+const wrap=$('imgWrap');
+let vs=1,vx=0,vy=0,moveMode=false,p0=null,pinch=null,pan=null;const ptrs=new Map();
+function fit(){
+  const cw=wrap.clientWidth,ch=wrap.clientHeight;if(!cw||!ch||!imgW)return;
+  const f=Math.min(cw/imgW,ch/imgH);
+  stage.style.width=imgW*f+'px';stage.style.height=imgH*f+'px';
+  vs=1;clampView();applyView();
+}
+function clampView(){
+  const cw=wrap.clientWidth,ch=wrap.clientHeight,sw=stage.offsetWidth*vs,sh=stage.offsetHeight*vs;
+  vx=sw<=cw?(cw-sw)/2:clamp(vx,cw-sw,0);
+  vy=sh<=ch?(ch-sh)/2:clamp(vy,ch-sh,0);
+}
+function applyView(){stage.style.transform=`translate(${vx}px,${vy}px) scale(${vs})`}
+function zoomAt(ns,cx,cy){ns=clamp(ns,1,10);const ax=(cx-vx)/vs,ay=(cy-vy)/vs;vs=ns;vx=cx-ax*vs;vy=cy-ay*vs;clampView();applyView()}
+addEventListener('resize',fit);
+$('mZ').onclick=()=>zoomAt(vs*1.5,wrap.clientWidth/2,wrap.clientHeight/2);
+$('mO').onclick=()=>zoomAt(vs/1.5,wrap.clientWidth/2,wrap.clientHeight/2);
+$('mFit').onclick=fit;
+$('mMove').onclick=e=>{moveMode=!moveMode;e.currentTarget.classList.toggle('pri',moveMode);wrap.classList.toggle('mv',moveMode)};
+wrap.addEventListener('wheel',e=>{e.preventDefault();const r=wrap.getBoundingClientRect();zoomAt(vs*Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+
+function fr(e){const r=stage.getBoundingClientRect();return{x:clamp((e.clientX-r.left)/r.width,0,1),y:clamp((e.clientY-r.top)/r.height,0,1),cx:e.clientX,cy:e.clientY}}
+const pdist=()=>{const [a,b]=[...ptrs.values()];return Math.hypot(a.x-b.x,a.y-b.y)};
+function cancelSel(){p0=null;rectEl.style.display='none'}
+wrap.addEventListener('pointerdown',e=>{
+  if(e.target.closest('#zc'))return;
+  wrap.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){
+    cancelSel();pan=null;
+    const [a,b]=[...ptrs.values()],r=wrap.getBoundingClientRect();
+    pinch={d:pdist(),s:vs,ax:((a.x+b.x)/2-r.left-vx)/vs,ay:((a.y+b.y)/2-r.top-vy)/vs};
+  }else if(ptrs.size===1){
+    if(moveMode||!words.length)pan={x:e.clientX,y:e.clientY,vx,vy};
+    else{p0=fr(e);drawRect(p0,p0)}
+  }
+});
+wrap.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&ptrs.size>=2){
+    const [a,b]=[...ptrs.values()],r=wrap.getBoundingClientRect();
+    vs=clamp(pinch.s*pdist()/pinch.d,1,10);
+    vx=(a.x+b.x)/2-r.left-pinch.ax*vs;vy=(a.y+b.y)/2-r.top-pinch.ay*vs;
+    clampView();applyView();
+  }else if(pan){vx=pan.vx+e.clientX-pan.x;vy=pan.vy+e.clientY-pan.y;clampView();applyView()}
+  else if(p0)drawRect(p0,fr(e));
+});
+function endPtr(e,cancel){
+  if(!ptrs.has(e.pointerId))return;
+  if(p0&&!cancel&&ptrs.size===1)finishSel(fr(e));
+  ptrs.delete(e.pointerId);cancelSel();
+  if(ptrs.size<2)pinch=null;
+  if(!ptrs.size)pan=null;
+}
+wrap.addEventListener('pointerup',e=>endPtr(e,false));
+wrap.addEventListener('pointercancel',e=>endPtr(e,true));
+function finishSel(p1){
+  const moved=Math.hypot(p1.cx-p0.cx,p1.cy-p0.cy)>8;
+  if(moved){
+    const x0=Math.min(p0.x,p1.x)*imgW,x1=Math.max(p0.x,p1.x)*imgW,y0=Math.min(p0.y,p1.y)*imgH,y1=Math.max(p0.y,p1.y)*imgH;
+    sel=new Set();
+    words.forEach((w,i)=>{const b=w.bbox,ix=Math.min(x1,b.x1)-Math.max(x0,b.x0),iy=Math.min(y1,b.y1)-Math.max(y0,b.y0);
+      if(ix>0&&iy>0&&ix*iy>=.4*(b.x1-b.x0)*(b.y1-b.y0))sel.add(i)});
+  }else{
+    const x=p1.x*imgW,y=p1.y*imgH;let hit=-1,best=1e9;
+    words.forEach((w,i)=>{const b=w.bbox,dx=Math.max(b.x0-x,0,x-b.x1),dy=Math.max(b.y0-y,0,y-b.y1),d=dx*dx+dy*dy;if(d<best){best=d;hit=i}});
+    if(hit>=0&&best<(imgW*.03/vs)**2)sel.has(hit)?sel.delete(hit):sel.add(hit);
+  }
+  refresh();
+}
+function drawRect(a,b){Object.assign(rectEl.style,{display:'block',left:Math.min(a.x,b.x)*100+'%',top:Math.min(a.y,b.y)*100+'%',width:Math.abs(a.x-b.x)*100+'%',height:Math.abs(a.y-b.y)*100+'%'})}
+
+$('selAll').onclick=()=>{sel=new Set(words.map((_,i)=>i));refresh()};
+$('clear').onclick=()=>{sel.clear();refresh()};
+$('retake').onclick=openLive;
+$('copy').onclick=async()=>{
+  const t=txt.value;if(!t)return;
+  try{await navigator.clipboard.writeText(t)}catch{txt.select();document.execCommand('copy')}
+  toast('已複製');
+};
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1400)}
+
+/* ---------- PWA: install / update / offline ---------- */
+let dip=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();dip=e;$('install').style.display='inline-block'});
+$('install').onclick=async()=>{if(!dip)return;dip.prompt();await dip.userChoice;dip=null;$('install').style.display='none'};
+addEventListener('appinstalled',()=>{$('install').style.display='none'});
+const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+if(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!standalone&&!localStorage.getItem('iosHint')){$('ios').style.display='block'}
+$('iosX').onclick=()=>{$('ios').style.display='none';try{localStorage.setItem('iosHint','1')}catch{}};
+
+function netState(){
+  const on=navigator.onLine;
+  $('net').textContent=(on?'':'離線 · ')+(offlineReady?'可離線使用':'首次載入中…');
+}
+let offlineReady=false;
+addEventListener('online',netState);addEventListener('offline',netState);
+async function checkOffline(){
+  try{offlineReady=!!(await caches.match('vendor/lang/chi_tra.traineddata.gz'))&&!!(await caches.match('vendor/core/tesseract-core-simd-lstm.wasm.js'))}catch{}
+  netState();
+  if(offlineReady)idleWarm();
+}
+if('serviceWorker'in navigator){
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    const offer=w=>{$('upd').style.display='flex';$('updBtn').onclick=()=>w.postMessage('SKIP_WAITING')};
+    if(reg.waiting&&navigator.serviceWorker.controller)offer(reg.waiting);
+    reg.addEventListener('updatefound',()=>{const w=reg.installing;w.addEventListener('statechange',()=>{
+      if(w.state==='installed'&&navigator.serviceWorker.controller)offer(w);
+      if(w.state==='activated')checkOffline();
+    })});
+    // look for a new version whenever the app comes back to the foreground
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)reg.update().catch(()=>{})});
+  }).catch(()=>{});
+  const hadCtl=!!navigator.serviceWorker.controller;let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!hadCtl||reloaded)return;reloaded=true;location.reload()});
+  navigator.serviceWorker.ready.then(checkOffline);
+}else netState();
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+
+/* ---------- boot ---------- */
+netState();
+</script>
+</body>
+</html>
