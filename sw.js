@@ -1,11 +1,11 @@
 // 改了任何檔案後，請把 VERSION 加 1，使用者就會看到「有新版本可用」
-const VERSION = 'v10';
+const VERSION = 'v13';
 const CACHE = 'ocr-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png',
   'vendor/tesseract.min.js', 'vendor/worker.min.js',
-  'vendor/core/tesseract-core-lstm.wasm.js', 'vendor/core/tesseract-core-simd-lstm.wasm.js',
+  'vendor/core/tesseract-core-lstm.wasm.js', 'vendor/core/tesseract-core-simd-lstm.wasm.js', 'vendor/core/tesseract-core-relaxedsimd-lstm.wasm.js',
   'vendor/lang/chi_tra.traineddata.gz', 'vendor/lang/eng.traineddata.gz'
 ];
 

@@ -67,19 +67,46 @@ select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid #38
 .livbar>:last-child{justify-self:end}
 #shutter{width:72px;height:72px;border-radius:50%;padding:0;background:var(--acc);border:4px solid #14181c;box-shadow:0 0 0 3px var(--acc)}
 #shutter:disabled{opacity:.5}
+button:disabled{opacity:.45;cursor:default}
+#resBar{padding:12px}
+#resBar button{padding:8px 11px}
+#resMain{flex:1;min-height:0;display:flex;flex-direction:column}
+#side{display:flex;flex-direction:column;min-height:0}
+.opts{display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 16px;background:var(--panel);border-top:1px solid #2a323a;font-size:13px;color:var(--dim)}
+.opts label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.opts input{accent-color:var(--acc)}
+#stage .w.lo{border-color:#ff9f43;border-style:dashed}
+.pcHint{display:none;color:var(--acc);font-size:14px;margin-top:6px}
+@media (pointer:fine){.pcHint{display:block}}
+#snip{background:#000}
+#snipBar{flex-wrap:wrap}
+#snipHint{color:var(--dim);font-size:14px;flex:1;text-align:center;min-width:160px}
+#snipBox{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#0b0e11}
+#snipWrap{position:relative;line-height:0;cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none}
+#snipCv{display:block}
+#snipSel{position:absolute;border:2px dashed var(--acc);background:rgba(255,210,63,.15);display:none;pointer-events:none}
+#drop{position:fixed;inset:10px;display:none;align-items:center;justify-content:center;border:3px dashed var(--acc);border-radius:16px;background:rgba(20,24,28,.85);color:var(--acc);font-size:22px;font-weight:700;z-index:8;pointer-events:none}
+#drop.on{display:flex}
+@media (min-width:900px){
+  #resMain{flex-direction:row}
+  #imgWrap{min-width:0}
+  #side{width:clamp(340px,38vw,560px);border-left:1px solid #2a323a}
+  #txt{flex:1;height:auto;min-height:0}
+}
 </style>
 </head>
 <body>
 
 <section id="cam" class="view on">
   <div id="status"><span id="net"></span><button id="install">安裝 App</button></div>
-  <div id="captureInfo"><strong>拍照後立即辨識文字</strong><span>即時預覽拍攝（可切換鏡頭並自動記憶），或選擇裝置中的照片</span></div>
+  <div id="captureInfo"><strong>拍照後立即辨識文字</strong><span>即時預覽拍攝（可切換鏡頭並自動記憶），或選擇裝置中的照片</span><span class="pcHint">電腦：按 Ctrl+V 貼上圖片，或把圖片檔拖進視窗</span></div>
   <div class="bar">
     <select id="lang" aria-label="辨識語言">
       <option value="chi_tra+eng">繁中＋英文</option>
       <option value="eng">僅英文（較快）</option>
     </select>
     <button class="pri" id="capture">拍照辨識</button>
+    <button id="snipBtn" style="display:none" title="擷取螢幕或視窗，框選後辨識">擷取螢幕</button>
     <button id="pick">選照片</button>
   </div>
   <input id="file" type="file" accept="image/*" hidden>
@@ -102,19 +129,39 @@ select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid #38
   </div>
 </section>
 
+<section id="snip" class="view">
+  <div class="bar" id="snipBar">
+    <button id="snipBack">取消</button>
+    <span id="snipHint">拖曳選取要辨識的區域；Enter 辨識、Esc 取消</span>
+    <span><button id="snipAll">整張辨識</button> <button class="pri" id="snipGo" disabled>辨識選取區</button></span>
+  </div>
+  <div id="snipBox"><div id="snipWrap"><canvas id="snipCv" width="1" height="1"></canvas><div id="snipSel"></div></div></div>
+</section>
+
 <section id="res" class="view">
-  <div class="bar">
+  <div class="bar" id="resBar">
     <button id="retake">重拍</button>
     <button id="selAll">全選</button>
     <button id="clear">清除選取</button>
+    <button id="reBtn" disabled title="先拖曳框選一塊區域，再用原圖解析度重新辨識">重辨框選區</button>
   </div>
+  <div id="resMain">
   <div id="imgWrap"><div id="stage"><img id="shot" alt="拍攝的照片"><div id="rect"></div></div>
     <div id="zc"><button id="mO" aria-label="縮小">－</button><button id="mZ" aria-label="放大">＋</button><button id="mFit">適合</button><button id="mMove">移動</button></div></div>
-  <div class="hint" id="hint">拖曳框選範圍、點一下選單字；雙指（或滾輪）縮放、平移</div>
+  <div id="side">
+  <div class="hint" id="hint">拖曳框選範圍、點一下選單字；框選後可按「重辨框選區」用原圖解析度重辨（橘色虛線＝低信心）</div>
   <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
+  <div class="opts">
+    <label><input type="checkbox" id="oBreak" checked>保留換行</label>
+    <label><input type="checkbox" id="oSpace" checked>去除中文間空格</label>
+    <label><input type="checkbox" id="oPunc">中文標點修正</label>
+    <label><input type="checkbox" id="oEnh" checked>影像增強</label>
+  </div>
   <div class="bar"><span id="count" style="color:var(--dim)"></span><button class="pri" id="copy">複製文字</button></div>
+  </div></div>
 </section>
 
+<div id="drop">放開以辨識圖片</div>
 <div id="prog"><div id="pmsg">準備中…</div><div id="pbar"><i></i></div></div>
 <div id="toast">已複製</div>
 <div id="upd"><span>有新版本可用</span><button id="updBtn">立即更新</button></div>
@@ -125,7 +172,7 @@ select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid #38
 const $=id=>document.getElementById(id);
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 let stage=$('stage'),shot=$('shot'),rectEl=$('rect'),txt=$('txt');
-let words=[],lines=[],sel=new Set(),imgW=1,imgH=1,boxEls=[];
+let words=[],lines=[],lineObjs=[],sel=new Set(),imgW=1,imgH=1,boxEls=[],orig=null,lastRect=null,shotUrl=null,lastMode='cam';
 
 /* ---------- storage helper ---------- */
 const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang'};
@@ -133,13 +180,17 @@ const ls={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,
 
 /* ---------- image picker (and native camera as fallback) ---------- */
 $('pick').onclick=()=>$('file').click();
-function openImage(input){
-  const f=input.files[0];if(!f)return;
+function loadFile(f){
+  if(!f)return;
+  lastMode='cam';$('retake').textContent='重拍';
+  stopCam();
+  if($('liv').classList.contains('on'))show('cam');
   const url=URL.createObjectURL(f),im=new Image();
   im.onload=()=>{URL.revokeObjectURL(url);run(im,im.naturalWidth,im.naturalHeight)};
-  im.onerror=()=>{URL.revokeObjectURL(url);toast('無法讀取這張照片')};
-  im.src=url;input.value='';
+  im.onerror=()=>{URL.revokeObjectURL(url);toast('無法讀取這張圖片')};
+  im.src=url;
 }
+function openImage(input){const f=input.files[0];input.value='';loadFile(f)}
 ['file','cameraFile'].forEach(id=>$(id).onchange=e=>openImage(e.currentTarget));
 
 /* ---------- OCR (all assets self-hosted under vendor/) ---------- */
@@ -151,11 +202,13 @@ function getWorker(lang,silent){
   const old=wkP;wkLang=lang;quiet=!!silent;
   const mine=wkP=(async()=>{
     if(old){try{(await old).terminate()}catch{}}
-    return Tesseract.createWorker(lang,1,{
+    const w=await Tesseract.createWorker(lang,1,{
       workerPath:abs('vendor/worker.min.js'),corePath:abs('vendor/core'),langPath:abs('vendor/lang'),
       workerBlobURL:false,cacheMethod:'none',
       logger:m=>{if(!quiet)setProg(true,STAT[m.status]||m.status,m.progress||0)}
     });
+    try{await w.setParameters({user_defined_dpi:'300'})}catch{}
+    return w;
   })();
   mine.catch(()=>{if(wkP===mine){wkP=null;wkLang=''}});
   return mine;
@@ -171,26 +224,104 @@ function idleWarm(){
   (window.requestIdleCallback||(f=>setTimeout(f,300)))(()=>{if(!warmed&&!document.hidden)warm()});
 }
 function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id===v))}
-async function run(src,w,h,crop){
-  const MAX=1600,k=Math.min(1,MAX/Math.max(w,h));
-  const c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
-  const g=c.getContext('2d');
-  if(crop)g.drawImage(src,crop[0],crop[1],crop[2],crop[3],0,0,c.width,c.height);else g.drawImage(src,0,0,c.width,c.height);
+const MAXO=matchMedia('(pointer:coarse)').matches?1600:2400;   // 電腦用較大的辨識尺寸
+function setLines(lo){
+  lineObjs=lo;words=lo.flat();
+  const m=new Map(words.map((w,i)=>[w,i]));
+  lines=lo.map(l=>l.map(w=>m.get(w)));
+}
+// tesseract.js v6+：結果在 data.blocks（區塊→段落→行→字詞），需在 recognize 第三個參數開啟
+const OUT={blocks:true};
+function toLines(data){
+  const out=[];
+  (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>out.push(l.words||[]))));
+  return out.map(ws=>ws.filter(x=>x.text&&x.text.trim()&&x.confidence>10).map(x=>{x.low=x.confidence<55;return x})).filter(l=>l.length);
+}
+// 灰階＋對比拉伸；背景偏暗（深色模式截圖）時自動反相
+function enhance(c){
+  const g=c.getContext('2d',{willReadFrequently:true});
+  const id=g.getImageData(0,0,c.width,c.height),d=id.data,n=c.width*c.height,hist=new Uint32Array(256);
+  for(let i=0,j=0;i<n;i++,j+=4){const y=(d[j]*77+d[j+1]*150+d[j+2]*29)>>8;d[j]=y;hist[y]++}
+  let lo=0,hi=255,acc=0,sum=0;
+  for(let v=0;v<256;v++){acc+=hist[v];sum+=v*hist[v];if(!lo&&acc>=n*.01)lo=v}
+  acc=0;for(let v=0;v<256;v++){acc+=hist[v];if(acc>=n*.99){hi=v;break}}
+  if(hi-lo<30){lo=0;hi=255}
+  const dark=sum/n<90,s=255/(hi-lo),lut=new Uint8ClampedArray(256);
+  for(let v=0;v<256;v++){const o=(v-lo)*s;lut[v]=dark?255-o:o}
+  for(let i=0,j=0;i<n;i++,j+=4){const y=lut[d[j]];d[j]=d[j+1]=d[j+2]=y}
+  g.putImageData(id,0,0);
+}
+async function run(src,w,h){
+  // 保留一份原圖（最長邊 4096），框選重辨與放大檢視都用它
+  const k0=Math.min(1,4096/Math.max(w,h));
+  orig=document.createElement('canvas');orig.width=Math.round(w*k0);orig.height=Math.round(h*k0);
+  const g=orig.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(src,0,0,orig.width,orig.height);
+  imgW=orig.width;imgH=orig.height;lastRect=null;
+  txt.value='';words=[];lineObjs=[];lines=[];sel.clear();clearBoxes();updateBtns();
+  show('res');fit();
+  const big=Math.max(orig.width,orig.height)>2000;
+  const blob=await new Promise(r=>orig.toBlob(r,big?'image/jpeg':'image/png',.92));
+  if(shotUrl)URL.revokeObjectURL(shotUrl);
+  shotUrl=URL.createObjectURL(blob);shot.src=shotUrl;
+  await ocrFull();
+}
+async function ocrFull(){
+  const W=orig.width,H=orig.height,side=Math.max(W,H);
+  let k=side>MAXO?MAXO/side:(side<1200?2:1);   // 太大縮小；小字截圖放大 2 倍
+  if(lastMode==='screen'&&side<=MAXO)k=Math.min(2,MAXO/side);   // 螢幕文字通常很小，盡量放大
+  const c=document.createElement('canvas');c.width=Math.round(W*k);c.height=Math.round(H*k);
+  const g=c.getContext('2d',{willReadFrequently:true});g.imageSmoothingQuality='high';g.drawImage(orig,0,0,c.width,c.height);
+  if($('oEnh').checked)enhance(c);
   imgW=c.width;imgH=c.height;
-  shot.src=c.toDataURL('image/jpeg',.9);
-  show('res');fit();txt.value='';words=[];lines=[];sel.clear();clearBoxes();
+  txt.value='';words=[];lineObjs=[];lines=[];sel.clear();lastRect=null;clearBoxes();updateBtns();
   quiet=false;setProg(true,'載入辨識引擎…',0);
   try{
     const worker=await getWorker($('lang').value);
-    const {data}=await worker.recognize(c);
-    lines=(data.lines||[]).map(l=>l.words.filter(x=>x.text.trim()&&x.confidence>20));
-    words=lines.flat();
-    lines=lines.map(l=>l.map(w=>words.indexOf(w)));
+    const {data}=await worker.recognize(c,{},OUT);
+    setLines(toLines(data));
     buildBoxes();refresh();
     if(!words.length)toast('沒有辨識到文字');
   }catch(e){
     console.error(e);wkP=null;wkLang='';txt.value='辨識失敗：'+(e.message||e)+'\n（請確認 vendor/ 資料夾已完整上傳）';
   }
+  setProg(false);
+}
+function updateBtns(){$('reBtn').disabled=!lastRect}
+function inside(w,r){const cx=(w.bbox.x0+w.bbox.x1)/2,cy=(w.bbox.y0+w.bbox.y1)/2;return cx>=r.x0&&cx<=r.x1&&cy>=r.y0&&cy<=r.y1}
+// 框選區域：從原圖裁切、放大、增強後單獨重辨，再換掉該區的舊字詞
+async function reocr(){
+  if(!lastRect||!orig)return;
+  const r=lastRect,sx=orig.width/imgW,sy=orig.height/imgH;
+  const x0=Math.max(0,Math.floor(r.x0*sx)-6),y0=Math.max(0,Math.floor(r.y0*sy)-6);
+  const x1=Math.min(orig.width,Math.ceil(r.x1*sx)+6),y1=Math.min(orig.height,Math.ceil(r.y1*sy)+6);
+  const cw=x1-x0,ch=y1-y0;if(cw<8||ch<8)return;
+  const side=Math.max(cw,ch),k=side>2400?2400/side:clamp(1600/side,1,3);
+  const c=document.createElement('canvas');c.width=Math.round(cw*k);c.height=Math.round(ch*k);
+  const g=c.getContext('2d',{willReadFrequently:true});g.imageSmoothingQuality='high';
+  g.drawImage(orig,x0,y0,cw,ch,0,0,c.width,c.height);
+  if($('oEnh').checked)enhance(c);
+  quiet=false;setProg(true,'重新辨識中…',0);
+  try{
+    const worker=await getWorker($('lang').value);
+    await worker.setParameters({tessedit_pageseg_mode:(cw/ch>8?'7':'6')});   // 7=單行 6=單一區塊
+    let data;
+    try{data=(await worker.recognize(c,{},OUT)).data}
+    finally{try{await worker.setParameters({tessedit_pageseg_mode:'3'})}catch{}}
+    const fresh=toLines(data).map(l=>l.map(w=>({text:w.text,confidence:w.confidence,low:w.low,bbox:{
+      x0:(x0+w.bbox.x0/k)/sx,x1:(x0+w.bbox.x1/k)/sx,y0:(y0+w.bbox.y0/k)/sy,y1:(y0+w.bbox.y1/k)/sy}})))
+      .map(l=>l.filter(w=>inside(w,r))).filter(l=>l.length);
+    if(!fresh.length)toast('框選區沒有辨識到文字');
+    else{
+      let ins=-1;const kept=[];
+      lineObjs.forEach(l=>{const k2=l.filter(w=>!inside(w,r));if(k2.length!==l.length&&ins<0)ins=kept.length;if(k2.length)kept.push(k2)});
+      if(ins<0){ins=kept.findIndex(l=>l[0].bbox.y0>r.y0);if(ins<0)ins=kept.length}
+      kept.splice(ins,0,...fresh);
+      const nw=new Set(fresh.flat());
+      setLines(kept);buildBoxes();
+      sel=new Set();words.forEach((w,i)=>{if(nw.has(w))sel.add(i)});   // 自動選取新結果
+      refresh();
+    }
+  }catch(e){console.error(e);toast('重新辨識失敗')}
   setProg(false);
 }
 function setProg(on,msg,p){$('prog').classList.toggle('on',on);if(msg)$('pmsg').textContent=msg;$('pbar').firstChild.style.width=Math.round((p||0)*100)+'%'}
@@ -252,6 +383,7 @@ async function startCam(){
   camBusy=false;
 }
 function openLive(){
+  lastMode='cam';$('retake').textContent='重拍';
   warm();
   if(!canLive||liveBroken){$('cameraFile').click();return}
   show('liv');startCam();
@@ -324,7 +456,7 @@ function clearBoxes(){stage.querySelectorAll('.w').forEach(e=>e.remove());boxEls
 function buildBoxes(){
   clearBoxes();
   words.forEach(w=>{
-    const b=w.bbox,d=document.createElement('div');d.className='w';
+    const b=w.bbox,d=document.createElement('div');d.className='w'+(w.low?' lo':'');
     d.style.cssText=`left:${b.x0/imgW*100}%;top:${b.y0/imgH*100}%;width:${(b.x1-b.x0)/imgW*100}%;height:${(b.y1-b.y0)/imgH*100}%`;
     stage.appendChild(d);boxEls.push(d);
   });
@@ -341,12 +473,22 @@ function joinWords(idx){
 function textFor(set){
   const out=[];
   lines.forEach(l=>{const pick=l.filter(i=>!set||set.has(i));if(pick.length)out.push(joinWords(pick))});
-  return out.join('\n');
+  return fmt(out);
+}
+const PM={',':'，','.':'。',':':'：',';':'；','!':'！','?':'？'};
+function fmt(arr){
+  let s;
+  if($('oBreak').checked)s=arr.join('\n');
+  else s=arr.reduce((a,t)=>!a?t:a+((CJK.test(a.slice(-1))||CJK.test(t[0]))?'':' ')+t,'');
+  if($('oSpace').checked)s=s.replace(/([\u2e80-\u9fff\uff00-\uffef])[ \t]+(?=[\u2e80-\u9fff\uff00-\uffef])/g,'$1');
+  if($('oPunc').checked)s=s.replace(/([\u3400-\u9fff])[ \t]*([,.:;!?])/g,(m,a,p)=>a+PM[p]);
+  return s;
 }
 function refresh(){
   boxEls.forEach((e,i)=>e.classList.toggle('s',sel.has(i)));
   txt.value=textFor(sel.size?sel:null);
-  $('count').textContent=sel.size?`已選 ${sel.size} 字詞`:`全部 ${words.length} 字詞`;
+  const lo=words.filter(w=>w.low).length;
+  $('count').textContent=(sel.size?`已選 ${sel.size} 字詞`:`全部 ${words.length} 字詞`)+(lo?` · ${lo} 低信心`:'');
 }
 /* ---------- result view: pinch/wheel zoom, pan, drag-select ---------- */
 const wrap=$('imgWrap');
@@ -382,7 +524,7 @@ wrap.addEventListener('pointerdown',e=>{
     const [a,b]=[...ptrs.values()],r=wrap.getBoundingClientRect();
     pinch={d:pdist(),s:vs,ax:((a.x+b.x)/2-r.left-vx)/vs,ay:((a.y+b.y)/2-r.top-vy)/vs};
   }else if(ptrs.size===1){
-    if(moveMode||!words.length)pan={x:e.clientX,y:e.clientY,vx,vy};
+    if(moveMode)pan={x:e.clientX,y:e.clientY,vx,vy};
     else{p0=fr(e);drawRect(p0,p0)}
   }
 });
@@ -410,6 +552,7 @@ function finishSel(p1){
   const moved=Math.hypot(p1.cx-p0.cx,p1.cy-p0.cy)>8;
   if(moved){
     const x0=Math.min(p0.x,p1.x)*imgW,x1=Math.max(p0.x,p1.x)*imgW,y0=Math.min(p0.y,p1.y)*imgH,y1=Math.max(p0.y,p1.y)*imgH;
+    lastRect={x0,y0,x1,y1};updateBtns();
     sel=new Set();
     words.forEach((w,i)=>{const b=w.bbox,ix=Math.min(x1,b.x1)-Math.max(x0,b.x0),iy=Math.min(y1,b.y1)-Math.max(y0,b.y0);
       if(ix>0&&iy>0&&ix*iy>=.4*(b.x1-b.x0)*(b.y1-b.y0))sel.add(i)});
@@ -424,13 +567,114 @@ function drawRect(a,b){Object.assign(rectEl.style,{display:'block',left:Math.min
 
 $('selAll').onclick=()=>{sel=new Set(words.map((_,i)=>i));refresh()};
 $('clear').onclick=()=>{sel.clear();refresh()};
-$('retake').onclick=openLive;
+$('retake').onclick=()=>lastMode==='screen'?snipStart():openLive();
 $('copy').onclick=async()=>{
   const t=txt.value;if(!t)return;
   try{await navigator.clipboard.writeText(t)}catch{txt.select();document.execCommand('copy')}
   toast('已複製');
 };
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1400)}
+
+/* ---------- 螢幕擷取辨識（getDisplayMedia） ---------- */
+let snipR=null,snipP0=null;
+if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)$('snipBtn').style.display='';
+async function grabScreen(){
+  const st=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:5}},audio:false});
+  try{
+    const v=document.createElement('video');v.muted=true;v.playsInline=true;v.srcObject=st;
+    await new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;setTimeout(()=>rej(new Error('timeout')),6000)});
+    await v.play();
+    await new Promise(r=>setTimeout(r,350));   // 等分享提示收掉、畫面穩定
+    if(v.requestVideoFrameCallback)await Promise.race([new Promise(r=>v.requestVideoFrameCallback(()=>r())),new Promise(r=>setTimeout(r,800))]);
+    const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext('2d').drawImage(v,0,0);
+    return c;
+  }finally{st.getTracks().forEach(t=>t.stop())}
+}
+function fitSnip(){
+  const cv=$('snipCv'),box=$('snipBox');if(!cv.width||!box.clientWidth)return;
+  const f=Math.min(box.clientWidth/cv.width,box.clientHeight/cv.height,1);
+  cv.style.width=Math.floor(cv.width*f)+'px';cv.style.height=Math.floor(cv.height*f)+'px';
+}
+async function snipStart(){
+  stopCam();
+  let c;
+  try{c=await grabScreen()}
+  catch(e){if(e&&e.name==='NotAllowedError')toast('已取消擷取');else{console.error(e);toast('無法擷取螢幕')}return}
+  if(!c.width||!c.height){toast('擷取到空白畫面');return}
+  const cv=$('snipCv');cv.width=c.width;cv.height=c.height;cv.getContext('2d').drawImage(c,0,0);
+  snipR=null;snipP0=null;$('snipSel').style.display='none';$('snipGo').disabled=true;
+  show('snip');fitSnip();
+}
+function snipRun(full){
+  const cv=$('snipCv'),r=(full||!snipR)?{x0:0,y0:0,x1:cv.width,y1:cv.height}:snipR;
+  const x=Math.round(r.x0),y=Math.round(r.y0),w=Math.max(1,Math.round(r.x1-r.x0)),h=Math.max(1,Math.round(r.y1-r.y0));
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  c.getContext('2d').drawImage(cv,x,y,w,h,0,0,w,h);
+  lastMode='screen';$('retake').textContent='重新擷取';
+  run(c,w,h);                      // run 會先同步複製像素，之後才釋放擷取畫面
+  cv.width=1;cv.height=1;
+}
+{
+  const sw=$('snipWrap'),sp=e=>{const r=sw.getBoundingClientRect();return{x:clamp((e.clientX-r.left)/r.width,0,1),y:clamp((e.clientY-r.top)/r.height,0,1)}};
+  const draw=(a,b)=>Object.assign($('snipSel').style,{display:'block',left:Math.min(a.x,b.x)*100+'%',top:Math.min(a.y,b.y)*100+'%',width:Math.abs(a.x-b.x)*100+'%',height:Math.abs(a.y-b.y)*100+'%'});
+  sw.addEventListener('pointerdown',e=>{sw.setPointerCapture(e.pointerId);snipP0=sp(e);snipR=null;$('snipGo').disabled=true;draw(snipP0,snipP0)});
+  sw.addEventListener('pointermove',e=>{if(snipP0)draw(snipP0,sp(e))});
+  sw.addEventListener('pointerup',e=>{
+    if(!snipP0)return;
+    const p1=sp(e),W=$('snipCv').width,H=$('snipCv').height;
+    const x0=Math.min(snipP0.x,p1.x)*W,x1=Math.max(snipP0.x,p1.x)*W,y0=Math.min(snipP0.y,p1.y)*H,y1=Math.max(snipP0.y,p1.y)*H;
+    snipP0=null;
+    if(x1-x0>=8&&y1-y0>=8){snipR={x0,y0,x1,y1};$('snipGo').disabled=false}
+    else{$('snipSel').style.display='none';snipR=null}
+  });
+  sw.addEventListener('pointercancel',()=>{snipP0=null});
+}
+$('snipBtn').onclick=snipStart;
+$('snipBack').onclick=()=>{$('snipCv').width=1;$('snipCv').height=1;show('cam')};
+$('snipAll').onclick=()=>snipRun(true);
+$('snipGo').onclick=()=>snipRun(false);
+addEventListener('resize',()=>{if($('snip').classList.contains('on'))fitSnip()});
+addEventListener('keydown',e=>{
+  if(!$('snip').classList.contains('on'))return;
+  if(e.key==='Enter'){e.preventDefault();snipRun(false)}
+  else if(e.key==='Escape')$('snipBack').click();
+});
+
+/* ---------- PC: paste / drag-drop / shortcuts / options ---------- */
+$('reBtn').onclick=reocr;
+addEventListener('paste',e=>{
+  const it=[...(e.clipboardData&&e.clipboardData.items||[])].find(x=>x.kind==='file'&&x.type.startsWith('image/'));
+  const f=it&&it.getAsFile();if(!f)return;
+  e.preventDefault();loadFile(f);
+});
+{
+  let dn=0;const hasFiles=e=>[...(e.dataTransfer&&e.dataTransfer.types||[])].includes('Files');
+  addEventListener('dragenter',e=>{if(hasFiles(e)){dn++;$('drop').classList.add('on')}});
+  addEventListener('dragleave',()=>{if(--dn<=0){dn=0;$('drop').classList.remove('on')}});
+  addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault()});
+  addEventListener('drop',e=>{
+    if(!hasFiles(e))return;
+    e.preventDefault();dn=0;$('drop').classList.remove('on');
+    const f=[...e.dataTransfer.files].find(x=>x.type.startsWith('image/'));
+    if(f)loadFile(f);else toast('請拖入圖片檔');
+  });
+}
+addEventListener('keydown',e=>{
+  if(!$('res').classList.contains('on'))return;
+  const inTxt=document.activeElement===txt,mod=e.ctrlKey||e.metaKey,k=e.key.toLowerCase();
+  if(mod&&k==='a'&&!inTxt){e.preventDefault();$('selAll').click()}
+  else if(mod&&k==='c'&&!String(getSelection())&&(!inTxt||txt.selectionStart===txt.selectionEnd)){e.preventDefault();$('copy').click()}
+  else if(e.key==='Escape'&&!inTxt)$('clear').click();
+});
+{
+  const OPT=['oBreak','oSpace','oPunc','oEnh'];
+  try{const o=JSON.parse(ls.get('ocrOpts')||'{}');OPT.forEach(id=>{if(id in o)$(id).checked=!!o[id]})}catch{}
+  OPT.forEach(id=>$(id).onchange=()=>{
+    ls.set('ocrOpts',JSON.stringify(Object.fromEntries(OPT.map(i=>[i,$(i).checked]))));
+    if(id==='oEnh'){if(orig)ocrFull()}else refresh();
+  });
+}
 
 /* ---------- PWA: install / update / offline ---------- */
 let dip=null;
