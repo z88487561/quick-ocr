@@ -156,6 +156,7 @@ button:disabled{opacity:.45;cursor:default}
   <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
   <div class="opts">
     <label id="accLbl" title="實驗功能：偵測模型只能跑 CPU，只有辨識／方向分類走 GPU，不一定比較快；請看右下角顯示的秒數自行比較。失敗會自動改用 CPU">加速 <select id="acc" aria-label="加速方式"><option value="cpu">CPU（預設）</option><option value="auto">WebGPU（實驗）</option></select></label>
+    <small id="accNote" style="flex-basis:100%;display:none"></small>
     <label>引擎 <select id="eng2" aria-label="辨識引擎"><option value="pp">高準確（PaddleOCR）</option><option value="pp1">高準確・快速</option><option value="tess">輕量（Tesseract）</option></select></label>
     <label><input type="checkbox" id="oBreak" checked>保留換行</label>
     <label><input type="checkbox" id="oSpace" checked>去除中文間空格</label>
@@ -241,7 +242,7 @@ function setLines(lo){
   lines=lo.map(l=>l.map(w=>m.get(w)));
 }
 /* ---------- 辨識引擎：PaddleOCR（Web Worker）／Tesseract ---------- */
-let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true,ppBackend='',lastInfo='';
+let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true,ppBackend='',ppGpu=null,lastInfo='';
 function engine(){const v=$('eng').value;return ppBroken?'tess':v}
 function paddleInit(){
   if(pwP)return pwP;
@@ -250,13 +251,13 @@ function paddleInit(){
     pw=w;
     w.onmessage=e=>{
       const m=e.data;
-      if(m.t==='ready'){ppBackend=m.backend;res(w)}
+      if(m.t==='ready'){ppBackend=m.backend;ppGpu=m.gpu||null;showAcc();res(w)}
       else if(m.t==='stage'){if(!ppQuiet)setProg(true,m.text,m.f)}
-      else if(m.t==='fallback'){console.warn('WebGPU 退回 CPU：',m.reason);ls.set(LSK.acc,'cpu');$('acc').value='cpu';toast('WebGPU 無法使用，已改用 CPU')}
+      else if(m.t==='fallback'){console.warn('WebGPU 退回 CPU：',m.reason);ppBackend='wasm';ppGpu={asked:true,ok:false,reason:m.reason};showAcc();toast('WebGPU 未啟用，已用 CPU：'+m.reason.slice(0,60))}
       else if(m.t==='load'){if(!ppQuiet)setProg(true,'下載高準確辨識引擎…（首次約 37MB，之後可離線）',m.f)}
       else if(m.t==='initfail')rej(new Error(m.message));
       else if(m.t==='prog'){const cb=pwCb.get(m.id);if(cb)cb.prog(m)}
-      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);ppBackend=m.backend||ppBackend;if(cb)cb.res(m.lines)}
+      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);ppBackend=m.backend||ppBackend;if(m.gpu)ppGpu=m.gpu;if(cb)cb.res(m.lines)}
       else if(m.t==='error'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.rej(new Error(m.message))}
     };
     w.onerror=e=>rej(new Error(e.message||'worker error'));
@@ -276,6 +277,7 @@ async function paddleLines(c,opts){
     w.postMessage({t:'run',id:rid,rgba:id.data.buffer,w:c.width,h:c.height,opts},[id.data.buffer]);
   });
   lastInfo=(ppBackend==='webgpu'?'WebGPU ':'CPU ')+((performance.now()-t0)/1000).toFixed(1)+' 秒';
+  showAcc();
   return ppToLines(res);
 }
 // PaddleOCR 的字元框 → 本程式的「字詞」：每個中日文字自成一詞，連續英數合成一詞
@@ -724,13 +726,22 @@ engSels.forEach(x=>x.onchange=()=>{
   if(x===$('eng2')&&orig)ocrFull();else warm();
 });
 syncEngUI();
+// 顯示「實際用了什麼」：要求 WebGPU 卻沒用上時，直接寫出原因
+function showAcc(){
+  const n=$('accNote'),asked=$('acc').value==='auto';
+  if(!asked||!navigator.gpu||engine()==='tess'){n.style.display='none';return}
+  if(ppBackend==='webgpu'){n.style.cssText='flex-basis:100%;display:block;color:#7bd88f';n.textContent='✓ 辨識與方向分類使用 WebGPU'+(ppGpu&&ppGpu.name?'（'+ppGpu.name+'）':'')+'；偵測仍在 CPU'}
+  else if(ppGpu&&ppGpu.asked&&ppGpu.ok===false){n.style.cssText='flex-basis:100%;display:block;color:#ff9f43';n.textContent='⚠ WebGPU 未啟用，目前用 CPU：'+ppGpu.reason}
+  else{n.style.display='none'}
+}
 // 加速方式：沒有 WebGPU 的瀏覽器直接隱藏；切換後重開背景執行緒並重辨，方便比較
 {
   const sv=ls.get(LSK.acc);if(sv==='cpu'||sv==='auto')$('acc').value=sv;
   if(!navigator.gpu)$('accLbl').style.display='none';
   $('acc').onchange=()=>{
     ls.set(LSK.acc,$('acc').value);
-    if(pw){pw.terminate();pw=null;pwP=null;ppBackend=''}
+    if(pw){pw.terminate();pw=null;pwP=null;ppBackend='';ppGpu=null}
+    showAcc();
     if(orig&&engine()!=='tess')ocrFull();
   };
 }
