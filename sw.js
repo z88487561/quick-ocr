@@ -1,5 +1,5 @@
 // 改了任何檔案後，請把 VERSION 加 1，使用者就會看到「有新版本可用」
-const VERSION = 'v18';
+const VERSION = 'v19';
 const CACHE = 'ocr-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
@@ -28,24 +28,39 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
 
+// 跨來源隔離（cross-origin isolation）：GitHub Pages 等靜態空間無法自訂回應標頭，
+// 由 Service Worker 替所有同源回應補上 COOP/COEP，頁面才能使用 SharedArrayBuffer → onnxruntime 多執行緒。
+// 本程式沒有任何跨來源資源，所以 require-corp 不會擋到東西。
+const COI = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Resource-Policy': 'same-origin'
+};
+function withCOI(res) {
+  if (!res || res.status === 0 || res.type === 'opaque' || res.type === 'opaqueredirect') return res;
+  const h = new Headers(res.headers);
+  for (const k in COI) h.set(k, COI[k]);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
+function handle(req) {
+  // 只有大型、不會變的檔案（模型、字典、onnxruntime）走長期快取
+  if (/\/vendor\/paddle\/(ort[^/]*\.mjs|[^/]*\.(wasm|onnx|ort|txt))$/.test(new URL(req.url).pathname)) {
+    return caches.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok && res.status === 200) { const cp = res.clone(); caches.open('paddle-v1').then(c => c.put(req, cp)); }
+      return res;
+    }));
+  }
+  return caches.match(req, { ignoreSearch: true }).then(hit => {
+    if (hit) return hit;
+    return fetch(req).catch(() =>
+      req.mode === 'navigate' ? caches.match('index.html') : Response.error()
+    );
+  });
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  // PaddleOCR 模型與執行環境（約 37MB）：第一次使用時才下載，之後快取（不隨 VERSION 清除）
-  // 只有大型、不會變的檔案（模型、字典、onnxruntime）走長期快取
-  if (/\/vendor\/paddle\/(ort[^/]*\.mjs|[^/]*\.(wasm|onnx|ort|txt))$/.test(new URL(req.url).pathname)) {
-    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
-      if (res.ok && res.status === 200) { const cp = res.clone(); caches.open('paddle-v1').then(c => c.put(req, cp)); }
-      return res;
-    })));
-    return;
-  }
-  e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then(hit => {
-      if (hit) return hit;
-      return fetch(req).catch(() =>
-        req.mode === 'navigate' ? caches.match('index.html') : Response.error()
-      );
-    })
-  );
+  e.respondWith(handle(req).then(withCOI));
 });

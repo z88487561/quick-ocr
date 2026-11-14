@@ -156,6 +156,7 @@ button:disabled{opacity:.45;cursor:default}
   <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
   <div class="opts">
     <label id="accLbl" title="實驗功能：偵測模型只能跑 CPU，只有辨識／方向分類走 GPU，不一定比較快；請看右下角顯示的秒數自行比較。失敗會自動改用 CPU">加速 <select id="acc" aria-label="加速方式"><option value="cpu">CPU（預設）</option><option value="auto">WebGPU（實驗）</option></select></label>
+    <label id="thrLbl">執行緒 <select id="thr" aria-label="執行緒數"><option value="auto">自動</option><option value="1">1（單執行緒）</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></label>
     <small id="accNote" style="flex-basis:100%;display:none"></small>
     <label>引擎 <select id="eng2" aria-label="辨識引擎"><option value="pp">高準確（PaddleOCR）</option><option value="pp1">高準確・快速</option><option value="tess">輕量（Tesseract）</option></select></label>
     <label><input type="checkbox" id="oBreak" checked>保留換行</label>
@@ -181,7 +182,7 @@ let stage=$('stage'),shot=$('shot'),rectEl=$('rect'),txt=$('txt');
 let words=[],lines=[],lineObjs=[],sel=new Set(),imgW=1,imgH=1,boxEls=[],orig=null,lastRect=null,shotUrl=null,lastMode='cam';
 
 /* ---------- storage helper ---------- */
-const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang',eng:'ocrEng',acc:'ocrAccel'};
+const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang',eng:'ocrEng',acc:'ocrAccel',thr:'ocrThreads'};
 const ls={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}},del:k=>{try{localStorage.removeItem(k)}catch{}}};
 
 /* ---------- image picker (and native camera as fallback) ---------- */
@@ -242,7 +243,7 @@ function setLines(lo){
   lines=lo.map(l=>l.map(w=>m.get(w)));
 }
 /* ---------- 辨識引擎：PaddleOCR（Web Worker）／Tesseract ---------- */
-let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true,ppBackend='',ppGpu=null,lastInfo='';
+let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true,ppBackend='',ppGpu=null,ppThreads=1,lastInfo='';
 function engine(){const v=$('eng').value;return ppBroken?'tess':v}
 function paddleInit(){
   if(pwP)return pwP;
@@ -251,17 +252,17 @@ function paddleInit(){
     pw=w;
     w.onmessage=e=>{
       const m=e.data;
-      if(m.t==='ready'){ppBackend=m.backend;ppGpu=m.gpu||null;showAcc();res(w)}
+      if(m.t==='ready'){ppBackend=m.backend;ppGpu=m.gpu||null;ppThreads=m.threads||1;showAcc();res(w)}
       else if(m.t==='stage'){if(!ppQuiet)setProg(true,m.text,m.f)}
       else if(m.t==='fallback'){console.warn('WebGPU 退回 CPU：',m.reason);ppBackend='wasm';ppGpu={asked:true,ok:false,reason:m.reason};showAcc();toast('WebGPU 未啟用，已用 CPU：'+m.reason.slice(0,60))}
       else if(m.t==='load'){if(!ppQuiet)setProg(true,'下載高準確辨識引擎…（首次約 37MB，之後可離線）',m.f)}
       else if(m.t==='initfail')rej(new Error(m.message));
       else if(m.t==='prog'){const cb=pwCb.get(m.id);if(cb)cb.prog(m)}
-      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);ppBackend=m.backend||ppBackend;if(m.gpu)ppGpu=m.gpu;if(cb)cb.res(m.lines)}
+      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);ppBackend=m.backend||ppBackend;if(m.gpu)ppGpu=m.gpu;if(m.threads)ppThreads=m.threads;if(cb)cb.res(m.lines)}
       else if(m.t==='error'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.rej(new Error(m.message))}
     };
     w.onerror=e=>rej(new Error(e.message||'worker error'));
-    w.postMessage({t:'init',accel:$('acc').value});
+    w.postMessage({t:'init',accel:$('acc').value,threads:$('thr').value});
   });
   pwP.catch(()=>{if(pw)pw.terminate();pw=null;pwP=null});
   return pwP;
@@ -276,7 +277,7 @@ async function paddleLines(c,opts){
     pwCb.set(rid,{res:resolve,rej:reject,prog:m=>setProg(true,PP_LABEL[m.stage]||'辨識中…',m.f)});
     w.postMessage({t:'run',id:rid,rgba:id.data.buffer,w:c.width,h:c.height,opts},[id.data.buffer]);
   });
-  lastInfo=(ppBackend==='webgpu'?'WebGPU ':'CPU ')+((performance.now()-t0)/1000).toFixed(1)+' 秒';
+  lastInfo=(ppBackend==='webgpu'?'WebGPU ':'CPU')+(ppThreads>1?'×'+ppThreads:'')+' '+((performance.now()-t0)/1000).toFixed(1)+' 秒';
   showAcc();
   return ppToLines(res);
 }
@@ -734,6 +735,17 @@ function showAcc(){
   else if(ppGpu&&ppGpu.asked&&ppGpu.ok===false){n.style.cssText='flex-basis:100%;display:block;color:#ff9f43';n.textContent='⚠ WebGPU 未啟用，目前用 CPU：'+ppGpu.reason}
   else{n.style.display='none'}
 }
+// 執行緒：需要跨來源隔離（由 Service Worker 補標頭，首次安裝後會自動重新整理一次）
+{
+  const sv=ls.get(LSK.thr);if(sv&&[...$('thr').options].some(o=>o.value===sv))$('thr').value=sv;
+  if(!crossOriginIsolated){$('thr').disabled=true;$('thrLbl').title='尚未啟用多執行緒：需要「跨來源隔離」。請重新整理一次（或更新到最新版）；若仍不行，表示此瀏覽器不支援'}
+  else $('thrLbl').title='PaddleOCR 的運算執行緒數；自動＝核心數的一半（最多 4）。結果旁會顯示例如 CPU×4';
+  $('thr').onchange=()=>{
+    ls.set(LSK.thr,$('thr').value);
+    if(pw){pw.terminate();pw=null;pwP=null;ppBackend='';ppGpu=null}
+    if(orig&&engine()!=='tess')ocrFull();
+  };
+}
 // 加速方式：沒有 WebGPU 的瀏覽器直接隱藏；切換後重開背景執行緒並重辨，方便比較
 {
   const sv=ls.get(LSK.acc);if(sv==='cpu'||sv==='auto')$('acc').value=sv;
@@ -813,7 +825,14 @@ if('serviceWorker'in navigator){
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)reg.update().catch(()=>{})});
   }).catch(()=>{});
   const hadCtl=!!navigator.serviceWorker.controller;let reloaded=false;
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!hadCtl||reloaded)return;reloaded=true;location.reload()});
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(reloaded)return;
+    if(!hadCtl){   // 首次安裝：Service Worker 接管後重新整理一次，頁面才會取得跨來源隔離標頭（多執行緒）；使用中就不打斷
+      if(!crossOriginIsolated&&!orig&&!sessionStorage.getItem('coiReload')){try{sessionStorage.setItem('coiReload','1')}catch{}reloaded=true;location.reload()}
+      return;
+    }
+    reloaded=true;location.reload();
+  });
   navigator.serviceWorker.ready.then(checkOffline);
 }else netState();
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
