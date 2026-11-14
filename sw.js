@@ -1,5 +1,5 @@
 // 改了任何檔案後，請把 VERSION 加 1，使用者就會看到「有新版本可用」
-const VERSION = 'v17';
+const VERSION = 'v18';
 const CACHE = 'ocr-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
