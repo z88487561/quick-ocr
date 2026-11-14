@@ -4,7 +4,7 @@
 import {PPOCR} from './pp-ocr.mjs';
 const base=new URL('./',import.meta.url);
 const FILES=[['PP-OCRv5_mobile_det_infer.ort',4896928],['PP-OCRv5_mobile_rec_infer.onnx',16559278],['cls.onnx',585000],['ppocrv5_dict.txt',74014]];
-let eng=null,initP=null,got=0,backend='wasm',accel='cpu',models=null,gpuNote={asked:false};
+let eng=null,initP=null,got=0,backend='wasm',accel='cpu',threadPref='auto',nThreads=1,models=null,gpuNote={asked:false};
 const total=FILES.reduce((a,f)=>a+f[1],0);
 const post=m=>self.postMessage(m);
 async function fetchBytes(name){
@@ -33,8 +33,7 @@ async function build(name){
   const ort=await import(name==='webgpu'?'./ort.jspi.min.mjs':'./ort.wasm.min.mjs');
   ort.env.wasm.wasmPaths=base.href;
   ort.env.wasm.proxy=false;
-  // 需要 cross-origin isolation 才能多執行緒；一般頁面為單執行緒
-  ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,(self.navigator&&navigator.hardwareConcurrency)||2):1;
+  ort.env.wasm.numThreads=nThreads;
   const cpu={executionProviders:['wasm'],graphOptimizationLevel:'all'};
   // 偵測模型為 .ort 格式（已針對 CPU 最佳化），WebGPU 無法載入，固定走 CPU；辨識／方向分類走 GPU
   const opt=name==='webgpu'?{det:cpu,rec:{executionProviders:['webgpu','wasm'],graphOptimizationLevel:'all'},cls:{executionProviders:['webgpu','wasm'],graphOptimizationLevel:'all'}}:cpu;
@@ -55,9 +54,18 @@ async function useWasm(reason){
   gpuNote={asked:true,ok:false,reason};
   post({t:'fallback',reason});
 }
+// 執行緒數：需要 cross-origin isolation（SharedArrayBuffer）才能多執行緒。
+// 自動＝邏輯核心數的一半（避開超執行緒），最多 4；也可手動指定
+function pickThreads(){
+  if(!self.crossOriginIsolated||typeof SharedArrayBuffer==='undefined')return 1;
+  if(threadPref!=='auto'){const n=parseInt(threadPref,10);return Math.max(1,Math.min(Number.isFinite(n)?n:1,16))}
+  const hc=(self.navigator&&navigator.hardwareConcurrency)||2;
+  return Math.max(1,Math.min(4,Math.floor(hc/2)));
+}
 function init(){
   if(initP)return initP;
   initP=(async()=>{
+    nThreads=pickThreads();
     const [det,rec,cls,dict]=await Promise.all(FILES.map(f=>fetchBytes(f[0])));
     models={det,rec,cls,dict:new TextDecoder().decode(dict)};
     gpuNote={asked:accel!=='cpu'};
@@ -73,7 +81,7 @@ function init(){
         catch(err){console.warn('WebGPU 自檢失敗：',err);await useWasm('GPU 自檢結果不符：'+short(err))}
       }
     }else{eng=await build('wasm');backend='wasm'}
-    post({t:'ready',backend,gpu:gpuNote});
+    post({t:'ready',backend,gpu:gpuNote,threads:nThreads,isolated:!!self.crossOriginIsolated});
   })();
   initP.catch(e=>{initP=null;got=0;post({t:'initfail',message:String(e&&e.message||e)})});
   return initP;
@@ -81,7 +89,7 @@ function init(){
 self.onmessage=async e=>{
   const m=e.data;
   try{
-    if(m.t==='init'){accel=m.accel||'cpu';await init()}
+    if(m.t==='init'){accel=m.accel||'cpu';threadPref=String(m.threads||'auto');await init()}
     else if(m.t==='run'){
       await init();
       const img={data:new Uint8ClampedArray(m.rgba),width:m.w,height:m.h};
@@ -93,7 +101,7 @@ self.onmessage=async e=>{
         console.warn('WebGPU 執行失敗，改用 CPU 重試：',err);
         await useWasm('GPU 執行失敗：'+short(err));lines=await go();
       }
-      post({t:'result',id:m.id,lines,backend,gpu:gpuNote});
+      post({t:'result',id:m.id,lines,backend,gpu:gpuNote,threads:nThreads});
     }
   }catch(err){post({t:'error',id:m.id,message:String(err&&err.message||err)})}
 };
