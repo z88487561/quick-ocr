@@ -60,8 +60,11 @@ function minAreaRect(hull){
 export class PPOCR{
   constructor(ort,sess,chars){this.ort=ort;this.det=sess.det;this.rec=sess.rec;this.cls=sess.cls;this.chars=chars}
   static async create(ort,{det,rec,cls,dict},sessionOptions={}){
-    const mk=m=>m?ort.InferenceSession.create(m,sessionOptions):null;
-    const [d,r,c]=await Promise.all([mk(det),mk(rec),mk(cls)]);
+    // sessionOptions 可為單一設定，或 {det,rec,cls} 各自設定（偵測模型的 .ort 格式只能跑 CPU，辨識／方向分類可走 WebGPU）
+    const opt=k=>sessionOptions[k]||sessionOptions;
+    const mk=(m,k)=>m?ort.InferenceSession.create(m,opt(k)):null;
+    // 依序建立：WebGPU 一次只允許建立一個 session（同時建立會報 another WebGPU EP inference session is being created）
+    const d=await mk(det,'det'),r=await mk(rec,'rec'),c=await mk(cls,'cls');
     return new PPOCR(ort,{det:d,rec:r,cls:c},dict.split('\n'));
   }
   T(data,dims){return new this.ort.Tensor('float32',data,dims)}
