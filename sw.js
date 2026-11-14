@@ -1,5 +1,5 @@
 // 改了任何檔案後，請把 VERSION 加 1，使用者就會看到「有新版本可用」
-const VERSION = 'v13';
+const VERSION = 'v15';
 const CACHE = 'ocr-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
@@ -27,6 +27,14 @@ self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skip
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  // PaddleOCR 模型與執行環境（約 37MB）：第一次使用時才下載，之後快取（不隨 VERSION 清除）
+  if (new URL(req.url).pathname.includes('/vendor/paddle/')) {
+    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok && res.status === 200) { const cp = res.clone(); caches.open('paddle-v1').then(c => c.put(req, cp)); }
+      return res;
+    })));
+    return;
+  }
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then(hit => {
       if (hit) return hit;

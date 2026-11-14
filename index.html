@@ -76,6 +76,8 @@ button:disabled{opacity:.45;cursor:default}
 .opts label{display:flex;align-items:center;gap:5px;cursor:pointer}
 .opts input{accent-color:var(--acc)}
 #stage .w.lo{border-color:#ff9f43;border-style:dashed}
+.opts select{padding:2px 6px;font-size:13px;border-radius:6px}
+.engLbl{margin-top:10px;font-size:14px;color:var(--dim);display:flex;align-items:center;gap:8px}
 .pcHint{display:none;color:var(--acc);font-size:14px;margin-top:6px}
 @media (pointer:fine){.pcHint{display:block}}
 #snip{background:#000}
@@ -99,7 +101,8 @@ button:disabled{opacity:.45;cursor:default}
 
 <section id="cam" class="view on">
   <div id="status"><span id="net"></span><button id="install">安裝 App</button></div>
-  <div id="captureInfo"><strong>拍照後立即辨識文字</strong><span>即時預覽拍攝（可切換鏡頭並自動記憶），或選擇裝置中的照片</span><span class="pcHint">電腦：按 Ctrl+V 貼上圖片，或把圖片檔拖進視窗</span></div>
+  <div id="captureInfo"><strong>拍照後立即辨識文字</strong><span>即時預覽拍攝（可切換鏡頭並自動記憶），或選擇裝置中的照片</span><label class="engLbl">辨識引擎 <select id="eng" aria-label="辨識引擎"><option value="pp">高準確（PaddleOCR）</option><option value="pp1">高準確・快速</option><option value="tess">輕量（Tesseract）</option></select></label>
+    <span class="pcHint">電腦：按 Ctrl+V 貼上圖片，或把圖片檔拖進視窗</span></div>
   <div class="bar">
     <select id="lang" aria-label="辨識語言">
       <option value="chi_tra+eng">繁中＋英文</option>
@@ -152,10 +155,11 @@ button:disabled{opacity:.45;cursor:default}
   <div class="hint" id="hint">拖曳框選範圍、點一下選單字；框選後可按「重辨框選區」用原圖解析度重辨（橘色虛線＝低信心）</div>
   <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
   <div class="opts">
+    <label>引擎 <select id="eng2" aria-label="辨識引擎"><option value="pp">高準確（PaddleOCR）</option><option value="pp1">高準確・快速</option><option value="tess">輕量（Tesseract）</option></select></label>
     <label><input type="checkbox" id="oBreak" checked>保留換行</label>
     <label><input type="checkbox" id="oSpace" checked>去除中文間空格</label>
     <label><input type="checkbox" id="oPunc">中文標點修正</label>
-    <label><input type="checkbox" id="oEnh" checked>影像增強</label>
+    <label id="enhLbl" title="僅 Tesseract 使用"><input type="checkbox" id="oEnh" checked>影像增強</label>
   </div>
   <div class="bar"><span id="count" style="color:var(--dim)"></span><button class="pri" id="copy">複製文字</button></div>
   </div></div>
@@ -175,7 +179,7 @@ let stage=$('stage'),shot=$('shot'),rectEl=$('rect'),txt=$('txt');
 let words=[],lines=[],lineObjs=[],sel=new Set(),imgW=1,imgH=1,boxEls=[],orig=null,lastRect=null,shotUrl=null,lastMode='cam';
 
 /* ---------- storage helper ---------- */
-const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang'};
+const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang',eng:'ocrEng'};
 const ls={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}},del:k=>{try{localStorage.removeItem(k)}catch{}}};
 
 /* ---------- image picker (and native camera as fallback) ---------- */
@@ -216,12 +220,17 @@ function getWorker(lang,silent){
 // 預熱：提早載入引擎與語言資料，拍完照就能直接辨識
 let warmed=false;
 function warm(){
-  if(!window.Tesseract)return;
-  warmed=true;getWorker($('lang').value,true).catch(()=>{});
+  warmed=true;
+  if(engine()==='tess'){if(window.Tesseract)getWorker($('lang').value,true).catch(()=>{});return}
+  ppQuiet=true;paddleInit().catch(()=>{});
 }
 function idleWarm(){
   if(warmed)return;
-  (window.requestIdleCallback||(f=>setTimeout(f,300)))(()=>{if(!warmed&&!document.hidden)warm()});
+  (window.requestIdleCallback||(f=>setTimeout(f,300)))(()=>{
+    if(warmed||document.hidden)return;
+    if(engine()==='tess')warm();
+    else caches.match('vendor/paddle/PP-OCRv5_mobile_rec_infer.onnx').then(h=>{if(h&&!warmed)warm()}).catch(()=>{});   // 已快取才預熱，避免偷偷下載
+  });
 }
 function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id===v))}
 const MAXO=matchMedia('(pointer:coarse)').matches?1600:2400;   // 電腦用較大的辨識尺寸
@@ -229,6 +238,67 @@ function setLines(lo){
   lineObjs=lo;words=lo.flat();
   const m=new Map(words.map((w,i)=>[w,i]));
   lines=lo.map(l=>l.map(w=>m.get(w)));
+}
+/* ---------- 辨識引擎：PaddleOCR（Web Worker）／Tesseract ---------- */
+let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true;
+function engine(){const v=$('eng').value;return ppBroken?'tess':v}
+function paddleInit(){
+  if(pwP)return pwP;
+  pwP=new Promise((res,rej)=>{
+    let w;try{w=new Worker('vendor/paddle/worker.mjs',{type:'module'})}catch(e){return rej(e)}
+    pw=w;
+    w.onmessage=e=>{
+      const m=e.data;
+      if(m.t==='ready')res(w);
+      else if(m.t==='load'){if(!ppQuiet)setProg(true,'下載高準確辨識引擎…（首次約 37MB，之後可離線）',m.f)}
+      else if(m.t==='initfail')rej(new Error(m.message));
+      else if(m.t==='prog'){const cb=pwCb.get(m.id);if(cb)cb.prog(m)}
+      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.res(m.lines)}
+      else if(m.t==='error'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.rej(new Error(m.message))}
+    };
+    w.onerror=e=>rej(new Error(e.message||'worker error'));
+    w.postMessage({t:'init'});
+  });
+  pwP.catch(()=>{if(pw)pw.terminate();pw=null;pwP=null});
+  return pwP;
+}
+const PP_LABEL={det:'偵測文字…',cls:'判斷方向…',rec:'辨識文字…'};
+async function paddleLines(c,opts){
+  ppQuiet=false;
+  const w=await paddleInit();
+  const id=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height),rid=++pwId;
+  const res=await new Promise((resolve,reject)=>{
+    pwCb.set(rid,{res:resolve,rej:reject,prog:m=>setProg(true,PP_LABEL[m.stage]||'辨識中…',m.f)});
+    w.postMessage({t:'run',id:rid,rgba:id.data.buffer,w:c.width,h:c.height,opts},[id.data.buffer]);
+  });
+  return ppToLines(res);
+}
+// PaddleOCR 的字元框 → 本程式的「字詞」：每個中日文字自成一詞，連續英數合成一詞
+function ppToLines(res){
+  return res.map(l=>{
+    const out=[];let cur=null;
+    const flush=()=>{if(cur){cur.confidence=cur.ps.reduce((a,b)=>a+b,0)/cur.ps.length*100;cur.low=cur.confidence<70;delete cur.ps;out.push(cur);cur=null}};
+    l.chars.forEach(c=>{
+      if(!c.ch.trim()){flush();return}
+      const bb={x0:c.bbox[0],y0:c.bbox[1],x1:c.bbox[2],y1:c.bbox[3]};
+      if(CJK.test(c.ch)){flush();cur={text:c.ch,bbox:bb,ps:[c.p]};flush()}
+      else if(cur){cur.text+=c.ch;cur.ps.push(c.p);const b=cur.bbox;b.x0=Math.min(b.x0,bb.x0);b.y0=Math.min(b.y0,bb.y0);b.x1=Math.max(b.x1,bb.x1);b.y1=Math.max(b.y1,bb.y1)}
+      else cur={text:c.ch,bbox:bb,ps:[c.p]};
+    });
+    flush();return out;
+  }).filter(l=>l.length);
+}
+// region：重辨框選區時傳入 {psm}（僅 Tesseract 使用）
+async function recognizeLines(c,region){
+  if(engine()!=='tess'){
+    try{return await paddleLines(c,{detScales:(engine()==='pp'&&!region)?[960,1536]:[1280],alsoLine:!!region})}
+    catch(err){console.error(err);ppBroken=true;syncEngUI();toast('高準確引擎無法使用，改用 Tesseract');quiet=false;setProg(true,'載入辨識引擎…',0)}
+  }
+  if($('oEnh').checked&&!c._enh){enhance(c);c._enh=true}
+  const worker=await getWorker($('lang').value);
+  if(region)await worker.setParameters({tessedit_pageseg_mode:region.psm});
+  try{const {data}=await worker.recognize(c,{},OUT);return toLines(data)}
+  finally{if(region)try{await worker.setParameters({tessedit_pageseg_mode:'3'})}catch{}}
 }
 // tesseract.js v6+：結果在 data.blocks（區塊→段落→行→字詞），需在 recognize 第三個參數開啟
 const OUT={blocks:true};
@@ -271,14 +341,11 @@ async function ocrFull(){
   if(lastMode==='screen'&&side<=MAXO)k=Math.min(2,MAXO/side);   // 螢幕文字通常很小，盡量放大
   const c=document.createElement('canvas');c.width=Math.round(W*k);c.height=Math.round(H*k);
   const g=c.getContext('2d',{willReadFrequently:true});g.imageSmoothingQuality='high';g.drawImage(orig,0,0,c.width,c.height);
-  if($('oEnh').checked)enhance(c);
   imgW=c.width;imgH=c.height;
   txt.value='';words=[];lineObjs=[];lines=[];sel.clear();lastRect=null;clearBoxes();updateBtns();
   quiet=false;setProg(true,'載入辨識引擎…',0);
   try{
-    const worker=await getWorker($('lang').value);
-    const {data}=await worker.recognize(c,{},OUT);
-    setLines(toLines(data));
+    setLines(await recognizeLines(c,null));
     buildBoxes();refresh();
     if(!words.length)toast('沒有辨識到文字');
   }catch(e){
@@ -295,19 +362,16 @@ async function reocr(){
   const x0=Math.max(0,Math.floor(r.x0*sx)-6),y0=Math.max(0,Math.floor(r.y0*sy)-6);
   const x1=Math.min(orig.width,Math.ceil(r.x1*sx)+6),y1=Math.min(orig.height,Math.ceil(r.y1*sy)+6);
   const cw=x1-x0,ch=y1-y0;if(cw<8||ch<8)return;
-  const side=Math.max(cw,ch),k=side>2400?2400/side:clamp(1600/side,1,3);
+  const side=Math.max(cw,ch),short=Math.min(cw,ch);
+  // Tesseract 愈大愈好（最多 3 倍）；PaddleOCR 內部會縮到固定高度，原圖解析度即可，只有太小才放大
+  const k=side>2400?2400/side:(engine()==='tess'?clamp(1600/side,1,3):(short<64?Math.min(3,96/short):1));
   const c=document.createElement('canvas');c.width=Math.round(cw*k);c.height=Math.round(ch*k);
   const g=c.getContext('2d',{willReadFrequently:true});g.imageSmoothingQuality='high';
   g.drawImage(orig,x0,y0,cw,ch,0,0,c.width,c.height);
-  if($('oEnh').checked)enhance(c);
   quiet=false;setProg(true,'重新辨識中…',0);
   try{
-    const worker=await getWorker($('lang').value);
-    await worker.setParameters({tessedit_pageseg_mode:(cw/ch>8?'7':'6')});   // 7=單行 6=單一區塊
-    let data;
-    try{data=(await worker.recognize(c,{},OUT)).data}
-    finally{try{await worker.setParameters({tessedit_pageseg_mode:'3'})}catch{}}
-    const fresh=toLines(data).map(l=>l.map(w=>({text:w.text,confidence:w.confidence,low:w.low,bbox:{
+    const lines=await recognizeLines(c,{psm:(cw/ch>8?'7':'6')});   // Tesseract：7=單行 6=單一區塊
+    const fresh=lines.map(l=>l.map(w=>({text:w.text,confidence:w.confidence,low:w.low,bbox:{
       x0:(x0+w.bbox.x0/k)/sx,x1:(x0+w.bbox.x1/k)/sx,y0:(y0+w.bbox.y0/k)/sy,y1:(y0+w.bbox.y1/k)/sy}})))
       .map(l=>l.filter(w=>inside(w,r))).filter(l=>l.length);
     if(!fresh.length)toast('框選區沒有辨識到文字');
@@ -641,6 +705,20 @@ addEventListener('keydown',e=>{
   else if(e.key==='Escape')$('snipBack').click();
 });
 
+/* ---------- 引擎選擇（兩處下拉同步、記住選擇） ---------- */
+const engSels=[$('eng'),$('eng2')];
+function syncEngUI(){
+  const t=engine()==='tess';
+  $('enhLbl').style.opacity=t?'':'.45';
+  engSels.forEach(x=>{x.title=ppBroken?'高準確引擎無法載入，目前使用 Tesseract（重新選擇可再試）':''});
+}
+{const sv=ls.get(LSK.eng);if(sv&&[...$('eng').options].some(o=>o.value===sv))engSels.forEach(x=>x.value=sv)}
+engSels.forEach(x=>x.onchange=()=>{
+  engSels.forEach(y=>y.value=x.value);ls.set(LSK.eng,x.value);ppBroken=false;syncEngUI();
+  if(x===$('eng2')&&orig)ocrFull();else warm();
+});
+syncEngUI();
+
 /* ---------- PC: paste / drag-drop / shortcuts / options ---------- */
 $('reBtn').onclick=reocr;
 addEventListener('paste',e=>{
@@ -672,7 +750,7 @@ addEventListener('keydown',e=>{
   try{const o=JSON.parse(ls.get('ocrOpts')||'{}');OPT.forEach(id=>{if(id in o)$(id).checked=!!o[id]})}catch{}
   OPT.forEach(id=>$(id).onchange=()=>{
     ls.set('ocrOpts',JSON.stringify(Object.fromEntries(OPT.map(i=>[i,$(i).checked]))));
-    if(id==='oEnh'){if(orig)ocrFull()}else refresh();
+    if(id==='oEnh'){if(orig&&engine()==='tess')ocrFull()}else refresh();
   });
 }
 
