@@ -155,6 +155,7 @@ button:disabled{opacity:.45;cursor:default}
   <div class="hint" id="hint">拖曳框選範圍、點一下選單字；框選後可按「重辨框選區」用原圖解析度重辨（橘色虛線＝低信心）</div>
   <textarea id="txt" spellcheck="false" aria-label="辨識結果"></textarea>
   <div class="opts">
+    <label id="accLbl" title="實驗功能：偵測模型只能跑 CPU，只有辨識／方向分類走 GPU，不一定比較快；請看右下角顯示的秒數自行比較。失敗會自動改用 CPU">加速 <select id="acc" aria-label="加速方式"><option value="cpu">CPU（預設）</option><option value="auto">WebGPU（實驗）</option></select></label>
     <label>引擎 <select id="eng2" aria-label="辨識引擎"><option value="pp">高準確（PaddleOCR）</option><option value="pp1">高準確・快速</option><option value="tess">輕量（Tesseract）</option></select></label>
     <label><input type="checkbox" id="oBreak" checked>保留換行</label>
     <label><input type="checkbox" id="oSpace" checked>去除中文間空格</label>
@@ -179,7 +180,7 @@ let stage=$('stage'),shot=$('shot'),rectEl=$('rect'),txt=$('txt');
 let words=[],lines=[],lineObjs=[],sel=new Set(),imgW=1,imgH=1,boxEls=[],orig=null,lastRect=null,shotUrl=null,lastMode='cam';
 
 /* ---------- storage helper ---------- */
-const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang',eng:'ocrEng'};
+const LSK={cam:'ocrCam',camLabel:'ocrCamLabel',zoom:'ocrZoom',lang:'ocrLang',eng:'ocrEng',acc:'ocrAccel'};
 const ls={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}},del:k=>{try{localStorage.removeItem(k)}catch{}}};
 
 /* ---------- image picker (and native camera as fallback) ---------- */
@@ -240,7 +241,7 @@ function setLines(lo){
   lines=lo.map(l=>l.map(w=>m.get(w)));
 }
 /* ---------- 辨識引擎：PaddleOCR（Web Worker）／Tesseract ---------- */
-let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true;
+let pw=null,pwP=null,pwId=0,pwCb=new Map(),ppBroken=false,ppQuiet=true,ppBackend='',lastInfo='';
 function engine(){const v=$('eng').value;return ppBroken?'tess':v}
 function paddleInit(){
   if(pwP)return pwP;
@@ -249,15 +250,17 @@ function paddleInit(){
     pw=w;
     w.onmessage=e=>{
       const m=e.data;
-      if(m.t==='ready')res(w);
+      if(m.t==='ready'){ppBackend=m.backend;res(w)}
+      else if(m.t==='stage'){if(!ppQuiet)setProg(true,m.text,m.f)}
+      else if(m.t==='fallback'){console.warn('WebGPU 退回 CPU：',m.reason);ls.set(LSK.acc,'cpu');$('acc').value='cpu';toast('WebGPU 無法使用，已改用 CPU')}
       else if(m.t==='load'){if(!ppQuiet)setProg(true,'下載高準確辨識引擎…（首次約 37MB，之後可離線）',m.f)}
       else if(m.t==='initfail')rej(new Error(m.message));
       else if(m.t==='prog'){const cb=pwCb.get(m.id);if(cb)cb.prog(m)}
-      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.res(m.lines)}
+      else if(m.t==='result'){const cb=pwCb.get(m.id);pwCb.delete(m.id);ppBackend=m.backend||ppBackend;if(cb)cb.res(m.lines)}
       else if(m.t==='error'){const cb=pwCb.get(m.id);pwCb.delete(m.id);if(cb)cb.rej(new Error(m.message))}
     };
     w.onerror=e=>rej(new Error(e.message||'worker error'));
-    w.postMessage({t:'init'});
+    w.postMessage({t:'init',accel:$('acc').value});
   });
   pwP.catch(()=>{if(pw)pw.terminate();pw=null;pwP=null});
   return pwP;
@@ -266,11 +269,13 @@ const PP_LABEL={det:'偵測文字…',cls:'判斷方向…',rec:'辨識文字…
 async function paddleLines(c,opts){
   ppQuiet=false;
   const w=await paddleInit();
+  const t0=performance.now();
   const id=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height),rid=++pwId;
   const res=await new Promise((resolve,reject)=>{
     pwCb.set(rid,{res:resolve,rej:reject,prog:m=>setProg(true,PP_LABEL[m.stage]||'辨識中…',m.f)});
     w.postMessage({t:'run',id:rid,rgba:id.data.buffer,w:c.width,h:c.height,opts},[id.data.buffer]);
   });
+  lastInfo=(ppBackend==='webgpu'?'WebGPU ':'CPU ')+((performance.now()-t0)/1000).toFixed(1)+' 秒';
   return ppToLines(res);
 }
 // PaddleOCR 的字元框 → 本程式的「字詞」：每個中日文字自成一詞，連續英數合成一詞
@@ -294,6 +299,7 @@ async function recognizeLines(c,region){
     try{return await paddleLines(c,{detScales:(engine()==='pp'&&!region)?[960,1536]:[1280],alsoLine:!!region})}
     catch(err){console.error(err);ppBroken=true;syncEngUI();toast('高準確引擎無法使用，改用 Tesseract');quiet=false;setProg(true,'載入辨識引擎…',0)}
   }
+  lastInfo='';
   if($('oEnh').checked&&!c._enh){enhance(c);c._enh=true}
   const worker=await getWorker($('lang').value);
   if(region)await worker.setParameters({tessedit_pageseg_mode:region.psm});
@@ -552,7 +558,7 @@ function refresh(){
   boxEls.forEach((e,i)=>e.classList.toggle('s',sel.has(i)));
   txt.value=textFor(sel.size?sel:null);
   const lo=words.filter(w=>w.low).length;
-  $('count').textContent=(sel.size?`已選 ${sel.size} 字詞`:`全部 ${words.length} 字詞`)+(lo?` · ${lo} 低信心`:'');
+  $('count').textContent=(sel.size?`已選 ${sel.size} 字詞`:`全部 ${words.length} 字詞`)+(lo?` · ${lo} 低信心`:'')+(lastInfo?` · ${lastInfo}`:'');
 }
 /* ---------- result view: pinch/wheel zoom, pan, drag-select ---------- */
 const wrap=$('imgWrap');
@@ -718,6 +724,16 @@ engSels.forEach(x=>x.onchange=()=>{
   if(x===$('eng2')&&orig)ocrFull();else warm();
 });
 syncEngUI();
+// 加速方式：沒有 WebGPU 的瀏覽器直接隱藏；切換後重開背景執行緒並重辨，方便比較
+{
+  const sv=ls.get(LSK.acc);if(sv==='cpu'||sv==='auto')$('acc').value=sv;
+  if(!navigator.gpu)$('accLbl').style.display='none';
+  $('acc').onchange=()=>{
+    ls.set(LSK.acc,$('acc').value);
+    if(pw){pw.terminate();pw=null;pwP=null;ppBackend=''}
+    if(orig&&engine()!=='tess')ocrFull();
+  };
+}
 
 /* ---------- PC: paste / drag-drop / shortcuts / options ---------- */
 $('reBtn').onclick=reocr;
